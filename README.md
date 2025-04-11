@@ -4,9 +4,9 @@
 </div>
 
 <div align="center">
-    <img alt="Build" src="https://github.com/desertwitch/gover/actions/workflows/golangci-lint.yml/badge.svg">
-    <img alt="Build" src="https://github.com/desertwitch/gover/actions/workflows/golang-build.yml/badge.svg">
-    <img alt="Build-Debug" src="https://github.com/desertwitch/gover/actions/workflows/golang-build-debug.yml/badge.svg">
+    <img alt="Build" src="https://github.com/desertwitch/ttmd/actions/workflows/golangci-lint.yml/badge.svg">
+    <img alt="Build" src="https://github.com/desertwitch/ttmd/actions/workflows/golang-build.yml/badge.svg">
+    <img alt="Build-Debug" src="https://github.com/desertwitch/ttmd/actions/workflows/golang-build-debug.yml/badge.svg">
 </div>
 
 <br />
