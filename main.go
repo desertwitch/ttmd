@@ -8,7 +8,7 @@ as well as an optional internal-only mode to restrict access to localhost.
 
 The server attaches to and manages Tmux sessions, providing websocket
 connectivity to requested terminal sessions with proper input/output handling,
-terminal resizing capabilities, as well as connection monitoring.
+terminal resizing capabilities, as well as overall connection monitoring.
 
 Please note that this program is only meant to be used in conjunction with the
 Tmux Terminal Manager (TTM) frontend on sufficiently secured Unraid data storage
