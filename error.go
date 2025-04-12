@@ -1,4 +1,4 @@
-package ttmd
+package main
 
 import "errors"
 

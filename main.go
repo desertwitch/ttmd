@@ -51,7 +51,7 @@ Parameters can be provided by request (GET) or as part of the endpoint path.
 After validation, connections are upgraded to websockets and authenticated based
 on the configuration flags before establishing the terminal session.
 */
-package ttmd
+package main
 
 import (
 	"context"
