@@ -249,7 +249,7 @@ func main() {
 		TimeFormat: time.RFC822,
 	})))
 
-	slog.Info("Welcome, I am ttmd",
+	slog.Info("ttmd",
 		"version", Version,
 	)
 
