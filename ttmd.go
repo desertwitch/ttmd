@@ -1,5 +1,5 @@
 /*
-ttmd - A robust HTTP server for handling TTM connections
+ttmd - A robust HTTP backend for handling TTM connections
 
 ttmd provides a lightweight HTTP server that manages websocket connections for
 the TTM (Tmux Terminal Manager) frontend. It features configurable CSRF
@@ -9,6 +9,10 @@ as well as an optional internal-only mode to restrict access to localhost.
 The server attaches to and manages Tmux sessions, providing websocket
 connectivity to requested terminal sessions with proper input/output handling,
 terminal resizing capabilities, as well as connection monitoring.
+
+Please note that this program is only meant to be used in conjunction with the
+Tmux Terminal Manager (TTM) frontend on sufficiently secured Unraid data storage
+systems within sufficiently secured networking environments without warranties.
 
 Usage:
 
@@ -47,7 +51,7 @@ Parameters can be provided by request (GET) or as part of the endpoint path.
 After validation, connections are upgraded to websockets and authenticated based
 on the configuration flags before establishing the terminal session.
 */
-package main
+package ttmd
 
 import (
 	"context"
