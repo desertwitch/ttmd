@@ -1,6 +1,6 @@
 <div align="center">
     <h1>ttmd</h1>
-    <p>A robust HTTP server for handling <a href="https://github.com/desertwitch/TTM-unRAID">TTM</a> connections.</p>
+    <p>A robust HTTP backend for handling <a href="https://github.com/desertwitch/TTM-unRAID">TTM</a> connections.</p>
 </div>
 
 <div align="center">
