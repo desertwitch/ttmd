@@ -24,9 +24,6 @@ const (
 	// connChannelBuffer is the buffer size for the connection buffers.
 	connChannelBuffer = 100
 
-	// connCleanTimeout is the time a connection has to cleanup its resources.
-	connCleanTimeout = 15 * time.Second
-
 	// connPingPongInterval is the interval at which ping-pong messages are sent
 	// to the other end of a websocket connection.
 	connPingPongInterval = 30 * time.Second
@@ -35,12 +32,11 @@ const (
 	// delivered to the other end of a websocket connection.
 	connPingPongTimeout = 10 * time.Second
 
-	// connPKillTimeout is the time the TTY process can take to exit upon
-	// receiving SIGTERM before SIGKILL is sent.
-	connPKillTimeout = 10 * time.Second
-
 	// connWriteTimeout is the time a websocket write can take.
 	connWriteTimeout = 30 * time.Second
+
+	// connCleanTimeout is the time a connection has to cleanup its resources.
+	connCleanTimeout = 15 * time.Second
 )
 
 // resizeMessage is a JSON control message containing information about the new
@@ -119,7 +115,10 @@ type Connection struct {
 	stateMu sync.RWMutex
 
 	// writeMu protects the websocket write operations.
-	writeMu sync.Mutex
+	wsWriteMu sync.Mutex
+
+	// writeSem is a semaphore protecting TTY write operations.
+	ptmxWriteSem chan struct{}
 }
 
 // NewConnection returns a pointer to a new [Connection].
@@ -132,6 +131,7 @@ func NewConnection(request *http.Request, responseWriter http.ResponseWriter, cs
 		csrfAuthenticator: csrfAuthenticator,
 		ptmxReads:         make(chan []byte, connChannelBuffer),
 		wsReads:           make(chan []byte, connChannelBuffer),
+		ptmxWriteSem:      make(chan struct{}, 1),
 	}
 
 	return conn
@@ -143,8 +143,8 @@ func NewConnection(request *http.Request, responseWriter http.ResponseWriter, cs
 // and teardown should not wait or be blocked by writing of the (last) message.
 func (c *Connection) writeMessage(message []byte, blockingWrite bool) error {
 	if blockingWrite {
-		c.writeMu.Lock()
-		defer c.writeMu.Unlock()
+		c.wsWriteMu.Lock()
+		defer c.wsWriteMu.Unlock()
 
 		if ws := c.Websocket(); ws != nil {
 			if err := ws.WriteMessage(websocket.BinaryMessage, message); err != nil {
@@ -155,8 +155,8 @@ func (c *Connection) writeMessage(message []byte, blockingWrite bool) error {
 		}
 	} else {
 		go func() {
-			c.writeMu.Lock()
-			defer c.writeMu.Unlock()
+			c.wsWriteMu.Lock()
+			defer c.wsWriteMu.Unlock()
 
 			if ws := c.Websocket(); ws != nil {
 				_ = ws.WriteMessage(websocket.BinaryMessage, message)
@@ -470,42 +470,6 @@ func (c *Connection) wsPingPong(ctx context.Context, cancel context.CancelFunc) 
 	}
 }
 
-// wsWriter writes messages read from the TTY to the websocket.
-func (c *Connection) wsWriter(ctx context.Context, cancel context.CancelFunc) {
-	defer func() {
-		if r := recover(); r != nil {
-			cancel()
-			slog.Error("Recovered from panic in WS writer",
-				"panic", r,
-				"id", c.sessionID,
-				"session", c.Name())
-		}
-		c.wg.Done()
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case msg := <-c.ptmxReads:
-			if ws := c.Websocket(); ws != nil {
-				_ = ws.SetWriteDeadline(time.Now().Add(connWriteTimeout))
-				if err := c.writeMessage(msg, true); err != nil {
-					slog.Warn("Websocket write error",
-						"err", err,
-						"id", c.sessionID,
-						"session", c.Name(),
-					)
-					_ = c.writeMessage([]byte("Websocket write failure - session closed."), false)
-					cancel()
-
-					return
-				}
-			}
-		}
-	}
-}
-
 // ptmxReader reads messages from the TTY and sends them to the websocket
 // writer.
 func (c *Connection) ptmxReader(ctx context.Context, cancel context.CancelFunc) {
@@ -554,12 +518,12 @@ func (c *Connection) ptmxReader(ctx context.Context, cancel context.CancelFunc) 
 	}
 }
 
-// ptmxWriter writes messages read from the websocket to the TTY.
-func (c *Connection) ptmxWriter(ctx context.Context, cancel context.CancelFunc) {
+// wsWriter writes messages read from the TTY to the websocket.
+func (c *Connection) wsWriter(ctx context.Context, cancel context.CancelFunc) {
 	defer func() {
 		if r := recover(); r != nil {
 			cancel()
-			slog.Error("Recovered from panic in TTY writer",
+			slog.Error("Recovered from panic in WS writer",
 				"panic", r,
 				"id", c.sessionID,
 				"session", c.Name())
@@ -571,34 +535,16 @@ func (c *Connection) ptmxWriter(ctx context.Context, cancel context.CancelFunc) 
 		select {
 		case <-ctx.Done():
 			return
-		case msg := <-c.wsReads:
-			resizeMessage := &resizeMessage{}
-			if err := json.Unmarshal(msg, resizeMessage); err == nil && resizeMessage.Type == "resize" {
-				if ptmx := c.Ptmx(); ptmx != nil {
-					if err := pty.Setsize(ptmx, &pty.Winsize{
-						Cols: resizeMessage.Cols,
-						Rows: resizeMessage.Rows,
-					}); err != nil {
-						slog.Warn("Failed to resize TTY",
-							"err", err,
-							"id", c.sessionID,
-							"session", c.Name(),
-						)
-					}
-				}
-
-				continue
-			}
-
-			if ptmx := c.Ptmx(); ptmx != nil {
-				if _, err := ptmx.Write(msg); err != nil {
-					slog.Warn("TTY write error",
+		case msg := <-c.ptmxReads:
+			if ws := c.Websocket(); ws != nil {
+				_ = ws.SetWriteDeadline(time.Now().Add(connWriteTimeout))
+				if err := c.writeMessage(msg, true); err != nil {
+					slog.Warn("Websocket write error",
 						"err", err,
 						"id", c.sessionID,
 						"session", c.Name(),
 					)
-					_ = c.writeMessage([]byte("TTY write failure - session closed."), false)
-
+					_ = c.writeMessage([]byte("Websocket write failure - session closed."), false)
 					cancel()
 
 					return
@@ -651,6 +597,65 @@ func (c *Connection) wsReader(ctx context.Context, cancel context.CancelFunc) {
 	}
 }
 
+// ptmxWriter writes messages read from the websocket to the TTY.
+func (c *Connection) ptmxWriter(ctx context.Context, cancel context.CancelFunc) {
+	defer func() {
+		if r := recover(); r != nil {
+			cancel()
+			slog.Error("Recovered from panic in TTY writer",
+				"panic", r,
+				"id", c.sessionID,
+				"session", c.Name())
+		}
+		c.wg.Done()
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-c.wsReads:
+			resizeMessage := &resizeMessage{}
+			if err := json.Unmarshal(msg, resizeMessage); err == nil && resizeMessage.Type == "resize" {
+				if ptmx := c.Ptmx(); ptmx != nil {
+					c.ptmxWriteSem <- struct{}{}
+					if err := pty.Setsize(ptmx, &pty.Winsize{
+						Cols: resizeMessage.Cols,
+						Rows: resizeMessage.Rows,
+					}); err != nil {
+						slog.Warn("Failed to resize TTY",
+							"err", err,
+							"id", c.sessionID,
+							"session", c.Name(),
+						)
+					}
+					<-c.ptmxWriteSem
+				}
+
+				continue
+			}
+
+			if ptmx := c.Ptmx(); ptmx != nil {
+				c.ptmxWriteSem <- struct{}{}
+				if _, err := ptmx.Write(msg); err != nil {
+					<-c.ptmxWriteSem
+					slog.Warn("TTY write error",
+						"err", err,
+						"id", c.sessionID,
+						"session", c.Name(),
+					)
+					_ = c.writeMessage([]byte("TTY write failure - session closed."), false)
+
+					cancel()
+
+					return
+				}
+				<-c.ptmxWriteSem
+			}
+		}
+	}
+}
+
 // destroyAfterPanic is a helper method that asynchronously calls the
 // [Connection.Destroy] method as part of panic recovery. Since the state of the
 // connection is unknown, destroying it could panic again or deadlock, so we
@@ -681,13 +686,6 @@ func (c *Connection) Destroy(cancel context.CancelFunc) error {
 		c.websocket = nil
 	}
 
-	if ptmx := c.ptmx; ptmx != nil {
-		if err := ptmx.Close(); err != nil {
-			return fmt.Errorf("(%s/destroy) failed to close tty: %w", c.Name(), err)
-		}
-		c.ptmx = nil
-	}
-
 	if cmd := c.cmd; cmd != nil && cmd.Process != nil {
 		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 			slog.Warn("Failed to terminate the TMUX process",
@@ -705,13 +703,28 @@ func (c *Connection) Destroy(cancel context.CancelFunc) error {
 
 		select {
 		case <-waitDone:
-		case <-time.After(connPKillTimeout):
+		case <-time.After(connCleanTimeout / 2): //nolint:mnd
 			if err := cmd.Process.Kill(); err != nil {
 				return fmt.Errorf("(%s/destroy) failed to kill TTY process: %w", c.Name(), err)
 			}
 		}
 
 		c.cmd = nil
+	}
+
+	if ptmx := c.ptmx; ptmx != nil {
+		select {
+		case c.ptmxWriteSem <- struct{}{}:
+		case <-time.After(connCleanTimeout / 2): //nolint:mnd
+			slog.Warn("Timed out waiting for TTY writes to complete",
+				"id", c.sessionID,
+				"session", c.Name(),
+			)
+		}
+		if err := ptmx.Close(); err != nil {
+			return fmt.Errorf("(%s/destroy) failed to close tty: %w", c.Name(), err)
+		}
+		c.ptmx = nil
 	}
 
 	waitDone := make(chan struct{})

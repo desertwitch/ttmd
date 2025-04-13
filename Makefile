@@ -3,7 +3,7 @@
 BINARY = ttmd
 SRC_DIR = .
 
-VERSION := $(shell git rev-parse --short=7 HEAD)
+VERSION := $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --short=7 HEAD)
 
 .PHONY: all $(BINARY) check clean clean-mocks debug help info lint mocks test test-coverage vendor
 
